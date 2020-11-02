@@ -1,7 +1,15 @@
 use std::env;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
+use std::net::TcpStream;
 use std::str::FromStr;
 use std::process;
+use std::sync::mpsc::{Sender, channel};
+use std::thread;
+use std::io::{self,Write};
+use std::time::Duration;
+
+const MAX: u16 = 1000;
+const TIMEOUT_DUR: u64 = 5;
 
 struct Arguments {
     flag: String,
@@ -42,6 +50,27 @@ impl Arguments {
     }
 }
 
+fn scan(tx: Sender<u16>, start_port: u16, addr: IpAddr, num_threads: u16) {
+    let mut port: u16 = start_port + 1;
+    let socket = SocketAddr::new(addr, port);
+    loop {
+        //match TcpStream::connect((addr, port)) {
+        match TcpStream::connect_timeout(&socket, Duration::from_secs(TIMEOUT_DUR)) {
+            Ok(_) => {
+                print!(".");
+                io::stdout().flush().unwrap();
+                tx.send(port).unwrap();
+            }
+            Err(_) => {}
+        }
+
+        if(MAX - port) <= num_threads {
+            break;
+        }
+        port += num_threads;
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     let program = args[0].clone();
@@ -55,4 +84,29 @@ fn main() {
             }
         }
     );
+
+    let num_threads = arguments.threads;
+    let addr = arguments.ipaddr;
+    let (tx, rx) = channel();
+    for i in 0..num_threads {
+        let tx = tx.clone();
+
+        thread::spawn(move || {
+            scan(tx, i, addr, num_threads)
+        });
+    }
+
+    let mut out = vec![];
+    drop(tx);
+    
+    for p in rx {
+        out.push(p);
+    }
+
+    println!("");
+    out.sort();
+    for v in out {
+        println!("{} is open", v);
+    }
+
 }
